@@ -6,6 +6,7 @@ import (
 	"io"
 )
 
+// Progress is a progress update parsed from an Nmap XML stream.
 type Progress struct {
 	Task      string `json:"task"`
 	Percent   string `json:"percent"`
@@ -68,14 +69,18 @@ type nmapHost struct {
 	} `xml:"os>osmatch"`
 }
 
+// ParseNmapXML parses and normalizes a complete Nmap XML document.
 func ParseNmapXML(reader io.Reader) (Result, error) {
 	return ParseNmapXMLWithProgress(reader, nil)
 }
 
+// ParseNmapXMLWithProgress parses Nmap XML and reports taskprogress elements.
 func ParseNmapXMLWithProgress(reader io.Reader, onProgress func(Progress)) (Result, error) {
 	return ParseNmapXMLIncremental(reader, onProgress, nil)
 }
 
+// ParseNmapXMLIncremental parses Nmap XML and reports hosts as they are decoded.
+// An error from onHost stops parsing and is returned with context.
 func ParseNmapXMLIncremental(reader io.Reader, onProgress func(Progress), onHost func(HostObservation) error) (Result, error) {
 	decoder := xml.NewDecoder(reader)
 	decoder.Strict = true

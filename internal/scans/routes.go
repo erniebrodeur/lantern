@@ -10,6 +10,7 @@ import (
 	"github.com/erniebrodeur/lantern/internal/providers"
 )
 
+// Route discovers and stores the route from the local host to target.
 func (m *Manager) Route(ctx context.Context, scanID, target string) (HostRoute, error) {
 	selections := m.providers.ResolveAll("route")
 	if len(selections) == 0 {
@@ -74,6 +75,7 @@ func (m *Manager) Route(ctx context.Context, scanID, target string) (HostRoute, 
 	return last, nil
 }
 
+// SavedRoutes returns routes previously discovered for a scan.
 func (m *Manager) SavedRoutes(ctx context.Context, scanID string) (RouteMap, error) {
 	if _, err := m.store.Get(ctx, scanID); err != nil {
 		return RouteMap{}, err

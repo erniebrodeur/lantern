@@ -6,6 +6,7 @@ import (
 	"unicode"
 )
 
+// DefaultProfileID identifies the built-in profile used when none is supplied.
 const DefaultProfileID = "builtin:quick"
 
 var builtInProfiles = []Profile{
@@ -15,6 +16,7 @@ var builtInProfiles = []Profile{
 	{ID: "builtin:deep", Label: "Deep", ArgumentText: "-sT -sV --version-all -p- --max-retries 2 --reason", Arguments: []string{"-sT", "-sV", "--version-all", "-p-", "--max-retries", "2", "--reason"}, BuiltIn: true},
 }
 
+// BuiltInProfiles returns defensive copies of all built-in scan profiles.
 func BuiltInProfiles() []Profile {
 	profiles := make([]Profile, len(builtInProfiles))
 	for index, profile := range builtInProfiles {
@@ -23,6 +25,7 @@ func BuiltInProfiles() []Profile {
 	return profiles
 }
 
+// BuiltInProfile returns a defensive copy of the named built-in profile.
 func BuiltInProfile(identifier string) (Profile, bool) {
 	for _, profile := range builtInProfiles {
 		if profile.ID == identifier {
@@ -32,6 +35,8 @@ func BuiltInProfile(identifier string) (Profile, bool) {
 	return Profile{}, false
 }
 
+// ParseArgumentText tokenizes shell-like argument text without invoking a shell.
+// It also rejects output and progress flags that Lantern manages itself.
 func ParseArgumentText(value string) ([]string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {

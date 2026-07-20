@@ -17,6 +17,8 @@ type Database struct {
 	Owner *store.FileOwner
 }
 
+// DatabaseFromEnvironment resolves the default database and applies the
+// LANTERN_DB_PATH override when present.
 func DatabaseFromEnvironment() (Database, error) {
 	path, owner, err := DefaultDatabase()
 	if err != nil {
@@ -25,6 +27,8 @@ func DatabaseFromEnvironment() (Database, error) {
 	return Database{Path: EnvOrDefault("LANTERN_DB_PATH", path), Owner: owner}, nil
 }
 
+// DefaultDatabase returns the current user's database path. Under sudo it also
+// returns the invoking user's ownership so database files remain accessible.
 func DefaultDatabase() (string, *store.FileOwner, error) {
 	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
 		account, err := user.Lookup(sudoUser)
@@ -48,6 +52,7 @@ func DefaultDatabase() (string, *store.FileOwner, error) {
 	return filepath.Join(home, ".lantern", "lantern.db"), nil, nil
 }
 
+// EnvOrDefault returns a non-empty environment value or fallback.
 func EnvOrDefault(name, fallback string) string {
 	if value := os.Getenv(name); value != "" {
 		return value
@@ -55,6 +60,7 @@ func EnvOrDefault(name, fallback string) string {
 	return fallback
 }
 
+// OpenDatabase opens the configured database with any requested ownership.
 func OpenDatabase(configuration Database) (*store.SQLite, error) {
 	if configuration.Owner != nil {
 		return store.OpenOwned(configuration.Path, *configuration.Owner)

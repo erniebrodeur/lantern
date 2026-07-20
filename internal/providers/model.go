@@ -6,6 +6,7 @@ import (
 	"time"
 )
 
+// Descriptor identifies a provider and the capability it implements.
 type Descriptor struct {
 	ID           string         `json:"id"`
 	Capability   string         `json:"capability"`
@@ -14,6 +15,7 @@ type Descriptor struct {
 	OSPriorities map[string]int `json:"-"`
 }
 
+// Status reports whether a provider can run on the current host.
 type Status struct {
 	Capability string `json:"capability"`
 	ProviderID string `json:"provider,omitempty"`
@@ -26,6 +28,7 @@ type Status struct {
 	Reason     string `json:"reason,omitempty"`
 }
 
+// Request contains the target and options supplied to a provider run.
 type Request struct {
 	RunID     string            `json:"runId"`
 	Target    string            `json:"target"`
@@ -33,11 +36,13 @@ type Request struct {
 	Options   map[string]string `json:"options,omitempty"`
 }
 
+// EntityRef identifies an entity referenced by a piece of evidence.
 type EntityRef struct {
 	Type string `json:"type"`
 	Key  string `json:"key"`
 }
 
+// Evidence is a versioned observation emitted by a provider.
 type Evidence struct {
 	ID             int64           `json:"id,omitempty"`
 	ProviderRunID  string          `json:"providerRunId,omitempty"`
@@ -52,6 +57,7 @@ type Evidence struct {
 	Confidence     float64         `json:"confidence"`
 }
 
+// Progress describes a provider's current unit of work.
 type Progress struct {
 	Phase     string `json:"phase,omitempty"`
 	Task      string `json:"task,omitempty"`
@@ -61,6 +67,7 @@ type Progress struct {
 	Total     int    `json:"total,omitempty"`
 }
 
+// Event is a progress, evidence, output, or completion update from a provider.
 type Event struct {
 	Type     string    `json:"type"`
 	Progress *Progress `json:"progress,omitempty"`
@@ -70,19 +77,23 @@ type Event struct {
 	ExitCode *int      `json:"exitCode,omitempty"`
 }
 
+// Selection pairs a resolved provider with its probed status.
 type Selection struct {
 	Provider Provider
 	Status   Status
 }
 
+// EmitFunc receives events produced during a provider run.
 type EmitFunc func(Event) error
 
+// Provider discovers one kind of network evidence.
 type Provider interface {
 	Describe() Descriptor
 	Probe(context.Context) Status
 	Run(context.Context, Request, EmitFunc) error
 }
 
+// Run records the lifecycle of one provider invocation for a scan.
 type Run struct {
 	ID         string     `json:"id"`
 	ScanID     string     `json:"scanId"`
@@ -95,6 +106,7 @@ type Run struct {
 	Error      string     `json:"error,omitempty"`
 }
 
+// EvidenceQuery filters evidence stored for a scan.
 type EvidenceQuery struct {
 	Kind        string
 	SubjectType string
@@ -102,6 +114,7 @@ type EvidenceQuery struct {
 	Limit       int
 }
 
+// ObservedHost is the minimal host identity discovered by a provider.
 type ObservedHost struct {
 	Hostname string `json:"hostname,omitempty"`
 	Reason   string `json:"reason,omitempty"`

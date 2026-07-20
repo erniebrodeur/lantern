@@ -18,21 +18,25 @@ import (
 
 const timestampFormat = time.RFC3339Nano
 
+// SQLite is a SQLite-backed implementation of scans.Store.
 type SQLite struct {
 	database *sql.DB
 	path     string
 	owner    *FileOwner
 }
 
+// Open opens or creates a Lantern database at path and applies migrations.
 func Open(path string) (*SQLite, error) {
 	return open(path, nil)
 }
 
+// FileOwner specifies the operating-system owner for database files.
 type FileOwner struct {
 	UID int
 	GID int
 }
 
+// OpenOwned opens a database and keeps its files owned by owner.
 func OpenOwned(path string, owner FileOwner) (*SQLite, error) {
 	return open(path, &owner)
 }
@@ -75,6 +79,7 @@ func open(path string, owner *FileOwner) (*SQLite, error) {
 	return store, nil
 }
 
+// Close closes the database and performs a final ownership repair.
 func (s *SQLite) Close() error {
 	closeErr := s.database.Close()
 	ownershipErr := s.repairOwnership()
@@ -138,6 +143,7 @@ func (s *SQLite) repairOwnership() error {
 	return nil
 }
 
+// Create persists a new scan.
 func (s *SQLite) Create(ctx context.Context, scan scans.Scan) error {
 	arguments, err := json.Marshal(scan.Arguments)
 	if err != nil {
@@ -150,6 +156,7 @@ func (s *SQLite) Create(ctx context.Context, scan scans.Scan) error {
 	return err
 }
 
+// ListProfiles returns all user-defined profiles.
 func (s *SQLite) ListProfiles(ctx context.Context) ([]scans.Profile, error) {
 	rows, err := s.database.QueryContext(ctx, `
 		SELECT id, argument_text, arguments_json, created_at, updated_at
@@ -170,6 +177,7 @@ func (s *SQLite) ListProfiles(ctx context.Context) ([]scans.Profile, error) {
 	return profiles, rows.Err()
 }
 
+// GetProfile returns a user-defined profile by identifier.
 func (s *SQLite) GetProfile(ctx context.Context, identifier string) (scans.Profile, error) {
 	profile, err := readProfile(s.database.QueryRowContext(ctx, `
 		SELECT id, argument_text, arguments_json, created_at, updated_at
@@ -181,6 +189,7 @@ func (s *SQLite) GetProfile(ctx context.Context, identifier string) (scans.Profi
 	return profile, err
 }
 
+// CreateProfile persists a new user-defined profile.
 func (s *SQLite) CreateProfile(ctx context.Context, profile scans.Profile) error {
 	if profile.CreatedAt == nil || profile.UpdatedAt == nil {
 		return fmt.Errorf("profile timestamps are required")
@@ -196,6 +205,7 @@ func (s *SQLite) CreateProfile(ctx context.Context, profile scans.Profile) error
 	return err
 }
 
+// UpdateProfile replaces a user-defined profile.
 func (s *SQLite) UpdateProfile(ctx context.Context, profile scans.Profile) error {
 	if profile.UpdatedAt == nil {
 		return fmt.Errorf("profile update timestamp is required")
@@ -210,11 +220,13 @@ func (s *SQLite) UpdateProfile(ctx context.Context, profile scans.Profile) error
 	return checkUpdated(result, err)
 }
 
+// DeleteProfile removes a user-defined profile.
 func (s *SQLite) DeleteProfile(ctx context.Context, identifier string) error {
 	result, err := s.database.ExecContext(ctx, "DELETE FROM scan_profiles WHERE id = ?", identifier)
 	return checkUpdated(result, err)
 }
 
+// List returns all scans in reverse chronological order.
 func (s *SQLite) List(ctx context.Context) ([]scans.Scan, error) {
 	rows, err := s.database.QueryContext(ctx, selectAllScans)
 	if err != nil {
@@ -232,6 +244,7 @@ func (s *SQLite) List(ctx context.Context) ([]scans.Scan, error) {
 	return result, rows.Err()
 }
 
+// Get returns a scan by identifier.
 func (s *SQLite) Get(ctx context.Context, identifier string) (scans.Scan, error) {
 	scan, err := readScan(s.database.QueryRowContext(ctx, selectScan+" WHERE id = ?", identifier))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -240,11 +253,13 @@ func (s *SQLite) Get(ctx context.Context, identifier string) (scans.Scan, error)
 	return scan, err
 }
 
+// Delete removes a scan and all data associated with it.
 func (s *SQLite) Delete(ctx context.Context, identifier string) error {
 	result, err := s.database.ExecContext(ctx, "DELETE FROM scan_runs WHERE id = ?", identifier)
 	return checkUpdated(result, err)
 }
 
+// MarkStarted transitions a scan to running and records its start time.
 func (s *SQLite) MarkStarted(ctx context.Context, identifier string, startedAt time.Time) error {
 	result, err := s.database.ExecContext(ctx, `
 		UPDATE scan_runs SET status = ?, started_at = ? WHERE id = ?
@@ -252,6 +267,7 @@ func (s *SQLite) MarkStarted(ctx context.Context, identifier string, startedAt t
 	return checkUpdated(result, err)
 }
 
+// AppendOutput appends raw tool output to a scan.
 func (s *SQLite) AppendOutput(ctx context.Context, identifier, output string) error {
 	result, err := s.database.ExecContext(ctx, `
 		UPDATE scan_runs SET output = output || ? WHERE id = ?
@@ -259,6 +275,7 @@ func (s *SQLite) AppendOutput(ctx context.Context, identifier, output string) er
 	return checkUpdated(result, err)
 }
 
+// Finish records a scan's terminal state and process result.
 func (s *SQLite) Finish(ctx context.Context, identifier string, status scans.Status, finishedAt time.Time, exitCode *int, message string) error {
 	result, err := s.database.ExecContext(ctx, `
 		UPDATE scan_runs
@@ -268,6 +285,7 @@ func (s *SQLite) Finish(ctx context.Context, identifier string, status scans.Sta
 	return checkUpdated(result, err)
 }
 
+// SaveResult replaces a scan's normalized result and host observations.
 func (s *SQLite) SaveResult(ctx context.Context, identifier string, result scans.Result) error {
 	transaction, err := s.database.BeginTx(ctx, nil)
 	if err != nil {
@@ -294,6 +312,7 @@ func (s *SQLite) SaveResult(ctx context.Context, identifier string, result scans
 	return transaction.Commit()
 }
 
+// SaveHost inserts or replaces a host observation for a scan.
 func (s *SQLite) SaveHost(ctx context.Context, scanID string, host scans.HostObservation) (scans.HostObservation, error) {
 	if len(host.Addresses) == 0 {
 		return scans.HostObservation{}, fmt.Errorf("host observation has no address")
@@ -353,6 +372,7 @@ func (s *SQLite) SaveHost(ctx context.Context, scanID string, host scans.HostObs
 	return s.GetHost(ctx, scanID, hostID)
 }
 
+// EnsureHost returns an existing host or creates a provisional observation.
 func (s *SQLite) EnsureHost(ctx context.Context, scanID string, address scans.Address, hostnames []scans.Hostname, reason string) (scans.HostObservation, bool, error) {
 	transaction, err := s.database.BeginTx(ctx, nil)
 	if err != nil {
@@ -400,6 +420,7 @@ func (s *SQLite) EnsureHost(ctx context.Context, scanID string, address scans.Ad
 	return host, created, err
 }
 
+// SaveHostEnrichment merges names and ownership data into a host observation.
 func (s *SQLite) SaveHostEnrichment(ctx context.Context, scanID string, address scans.Address, hostnames []scans.Hostname, ownership *scans.Ownership) (scans.HostObservation, error) {
 	transaction, err := s.database.BeginTx(ctx, nil)
 	if err != nil {
@@ -442,6 +463,7 @@ func (s *SQLite) SaveHostEnrichment(ctx context.Context, scanID string, address 
 	return s.GetHost(ctx, scanID, hostID)
 }
 
+// SaveScanOwnership records ownership data for a scan's target.
 func (s *SQLite) SaveScanOwnership(ctx context.Context, scanID string, ownership *scans.Ownership) (scans.Scan, error) {
 	encoded, err := json.Marshal(ownership)
 	if err != nil {
@@ -465,6 +487,7 @@ func (s *SQLite) updateIncrementalCounts(ctx context.Context, scanID string) err
 	return checkUpdated(updated, err)
 }
 
+// SaveSummary updates aggregate result fields without replacing hosts.
 func (s *SQLite) SaveSummary(ctx context.Context, identifier string, result scans.Result) error {
 	updated, err := s.database.ExecContext(ctx, `
 		UPDATE scan_runs
@@ -474,6 +497,7 @@ func (s *SQLite) SaveSummary(ctx context.Context, identifier string, result scan
 	return checkUpdated(updated, err)
 }
 
+// ListTools returns the provider tools recorded for a scan.
 func (s *SQLite) ListTools(ctx context.Context, scanID string) ([]scans.ToolActivity, error) {
 	var exists int
 	if err := s.database.QueryRowContext(ctx, "SELECT 1 FROM scan_runs WHERE id = ?", scanID).Scan(&exists); errors.Is(err, sql.ErrNoRows) {
@@ -606,6 +630,7 @@ func insertHostChildren(ctx context.Context, transaction *sql.Tx, hostID int64, 
 	return nil
 }
 
+// ListHosts returns a page of compact host observations for a scan.
 func (s *SQLite) ListHosts(ctx context.Context, scanID string, limit, offset int) (scans.HostPage, error) {
 	page := scans.HostPage{Items: make([]scans.HostSummary, 0), Limit: limit, Offset: offset}
 	if err := s.database.QueryRowContext(ctx, "SELECT COUNT(*) FROM scan_hosts WHERE scan_id = ?", scanID).Scan(&page.Total); err != nil {
@@ -642,6 +667,7 @@ func (s *SQLite) ListHosts(ctx context.Context, scanID string, limit, offset int
 	return page, rows.Err()
 }
 
+// GetHost returns one detailed host observation from a scan.
 func (s *SQLite) GetHost(ctx context.Context, scanID string, hostID int64) (scans.HostObservation, error) {
 	var host scans.HostObservation
 	var osMatches, ownership string
@@ -743,6 +769,7 @@ func (s *SQLite) GetHost(ctx context.Context, scanID string, hostID int64) (scan
 	return host, nil
 }
 
+// SaveRoute inserts or replaces a discovered route for a scan target.
 func (s *SQLite) SaveRoute(ctx context.Context, scanID string, route scans.HostRoute) error {
 	hops, err := json.Marshal(route.Hops)
 	if err != nil {
@@ -760,6 +787,7 @@ func (s *SQLite) SaveRoute(ctx context.Context, scanID string, route scans.HostR
 	return err
 }
 
+// ListRoutes returns all discovered routes for a scan.
 func (s *SQLite) ListRoutes(ctx context.Context, scanID string) (scans.RouteMap, error) {
 	rows, err := s.database.QueryContext(ctx, `
 		SELECT target, tool, hops_json, error
@@ -792,6 +820,7 @@ func (s *SQLite) ListRoutes(ctx context.Context, scanID string) (scans.RouteMap,
 	return result, nil
 }
 
+// CreateProviderRun records the start of a provider invocation.
 func (s *SQLite) CreateProviderRun(ctx context.Context, run providers.Run) error {
 	_, err := s.database.ExecContext(ctx, `
 		INSERT INTO provider_runs (id, scan_id, capability, provider_id, label, status, started_at, error)
@@ -800,6 +829,7 @@ func (s *SQLite) CreateProviderRun(ctx context.Context, run providers.Run) error
 	return err
 }
 
+// FinishProviderRun records the terminal state of a provider invocation.
 func (s *SQLite) FinishProviderRun(ctx context.Context, identifier, status string, finishedAt time.Time, errorMessage string) error {
 	updated, err := s.database.ExecContext(ctx, `
 		UPDATE provider_runs SET status = ?, finished_at = ?, error = ? WHERE id = ?
@@ -807,6 +837,7 @@ func (s *SQLite) FinishProviderRun(ctx context.Context, identifier, status strin
 	return checkUpdated(updated, err)
 }
 
+// SaveEvidence persists evidence emitted by a provider invocation.
 func (s *SQLite) SaveEvidence(ctx context.Context, providerRunID string, evidence providers.Evidence) (providers.Evidence, error) {
 	if evidence.Kind == "" || evidence.Subject.Type == "" || evidence.Subject.Key == "" {
 		return providers.Evidence{}, errors.New("provider evidence requires kind and subject")
@@ -840,6 +871,7 @@ func (s *SQLite) SaveEvidence(ctx context.Context, providerRunID string, evidenc
 	return evidence, nil
 }
 
+// ListEvidence returns evidence for a scan matching query.
 func (s *SQLite) ListEvidence(ctx context.Context, scanID string, query providers.EvidenceQuery) ([]providers.Evidence, error) {
 	limit := query.Limit
 	if limit < 1 || limit > 1000 {
@@ -888,6 +920,7 @@ func (s *SQLite) ListEvidence(ctx context.Context, scanID string, query provider
 	return result, rows.Err()
 }
 
+// InterruptRunning marks scans left running after a process exit as interrupted.
 func (s *SQLite) InterruptRunning(ctx context.Context, finishedAt time.Time) error {
 	_, err := s.database.ExecContext(ctx, `
 		UPDATE scan_runs

@@ -18,6 +18,7 @@ const (
 	routeCapability = "route"
 )
 
+// RouteHop is one hop emitted by a route-discovery provider.
 type RouteHop struct {
 	TTL       int     `json:"ttl"`
 	Address   string  `json:"address,omitempty"`
@@ -25,6 +26,7 @@ type RouteHop struct {
 	LatencyMS float64 `json:"latencyMs,omitempty"`
 }
 
+// Route is the evidence payload for a discovered network path.
 type Route struct {
 	Target string     `json:"target"`
 	Tool   string     `json:"tool"`
@@ -40,10 +42,12 @@ type routeProvider struct {
 	path     string
 }
 
+// NewMTRProvider returns a route provider backed by mtr.
 func NewMTRProvider(runner CommandRunner) Provider {
 	return newRouteProvider("mtr", "MTR", 100, runner)
 }
 
+// NewTracerouteProvider returns a route provider backed by traceroute.
 func NewTracerouteProvider(runner CommandRunner) Provider {
 	return newRouteProvider("traceroute", "Traceroute", 90, runner)
 }

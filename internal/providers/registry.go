@@ -8,6 +8,8 @@ import (
 	"sync"
 )
 
+// Registry probes providers and resolves the best available implementation of
+// each capability for the current operating system.
 type Registry struct {
 	goos      string
 	lookupEnv func(string) string
@@ -20,6 +22,7 @@ type Registry struct {
 	diagnostics []Status
 }
 
+// NewRegistry constructs and probes a provider registry for goos.
 func NewRegistry(goos string, lookupEnv func(string) string, available ...Provider) *Registry {
 	return &Registry{
 		goos:      goos,
@@ -31,12 +34,14 @@ func NewRegistry(goos string, lookupEnv func(string) string, available ...Provid
 	}
 }
 
+// Register adds providers to the registry and probes them.
 func (r *Registry) Register(additional ...Provider) {
 	r.mu.Lock()
 	r.providers = append(r.providers, additional...)
 	r.mu.Unlock()
 }
 
+// Refresh probes every registered provider again.
 func (r *Registry) Refresh(ctx context.Context) {
 	r.mu.RLock()
 	registered := append([]Provider(nil), r.providers...)
@@ -111,12 +116,14 @@ func (r *Registry) Refresh(ctx context.Context) {
 	r.mu.Unlock()
 }
 
+// ResolveAll returns all available providers for capability in priority order.
 func (r *Registry) ResolveAll(capability string) []Selection {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return append([]Selection(nil), r.available[capability]...)
 }
 
+// Resolve returns the highest-priority available provider for capability.
 func (r *Registry) Resolve(capability string) (Provider, Status, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -124,6 +131,7 @@ func (r *Registry) Resolve(capability string) (Provider, Status, bool) {
 	return provider, r.statuses[capability], ok
 }
 
+// Statuses returns a snapshot of all provider probe results.
 func (r *Registry) Statuses() []Status {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

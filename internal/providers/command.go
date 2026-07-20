@@ -11,19 +11,25 @@ import (
 	"time"
 )
 
+// ErrOutputLimit indicates that a command produced more output than allowed.
 var ErrOutputLimit = errors.New("provider output exceeded its limit")
 
+// CommandResult contains the captured output streams of an external command.
 type CommandResult struct {
 	Stdout []byte
 	Stderr []byte
 }
 
+// CommandRunner executes provider commands with time and output limits.
 type CommandRunner interface {
 	Run(context.Context, string, []string, time.Duration, int) (CommandResult, error)
 }
 
+// ExecRunner executes commands as child processes without invoking a shell.
 type ExecRunner struct{}
 
+// ResolveExecutable finds a configured command, a PATH fallback, or a standard
+// executable path, in that order.
 func ResolveExecutable(configured, fallback string, standardPaths []string) string {
 	configured = strings.TrimSpace(configured)
 	if configured != "" {
@@ -44,6 +50,7 @@ func ResolveExecutable(configured, fallback string, standardPaths []string) stri
 	return ""
 }
 
+// CommandContext creates a platform-configured command without invoking a shell.
 func CommandContext(ctx context.Context, path string, arguments ...string) *exec.Cmd {
 	// Paths come from provider probes and arguments cross typed validation
 	// boundaries. Providers never invoke a shell.
@@ -53,6 +60,7 @@ func CommandContext(ctx context.Context, path string, arguments ...string) *exec
 	return command
 }
 
+// Run executes path with a deadline and independently capped output streams.
 func (ExecRunner) Run(parent context.Context, path string, arguments []string, timeout time.Duration, maxOutputBytes int) (CommandResult, error) {
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()

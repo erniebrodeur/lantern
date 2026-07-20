@@ -32,6 +32,7 @@ type whoisCacheEntry struct {
 	expiresAt    time.Time
 }
 
+// NewWHOISProvider returns an ownership provider backed by a WHOIS command.
 func NewWHOISProvider(runner CommandRunner, configuredPath string) Provider {
 	if runner == nil {
 		runner = ExecRunner{}

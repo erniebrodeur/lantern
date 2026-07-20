@@ -12,10 +12,12 @@ import (
 
 const reverseDNSTimeout = 2 * time.Second
 
+// ReverseDNSResolver performs reverse address lookups.
 type ReverseDNSResolver interface {
 	LookupAddr(context.Context, string) ([]string, error)
 }
 
+// ReverseDNS is the evidence payload for PTR names associated with an address.
 type ReverseDNS struct {
 	Names []string `json:"names"`
 }
@@ -24,6 +26,8 @@ type reverseDNSProvider struct {
 	resolver ReverseDNSResolver
 }
 
+// NewReverseDNSProvider returns a provider using resolver for PTR lookups.
+// A nil resolver selects net.DefaultResolver.
 func NewReverseDNSProvider(resolver ReverseDNSResolver) Provider {
 	if resolver == nil {
 		resolver = net.DefaultResolver

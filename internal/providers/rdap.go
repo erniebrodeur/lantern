@@ -23,6 +23,7 @@ const (
 	rdapNegativeCacheTTL = 5 * time.Minute
 )
 
+// NetworkRegistration is normalized ownership data for an address range.
 type NetworkRegistration struct {
 	Organization string `json:"organization,omitempty"`
 	NetworkName  string `json:"networkName,omitempty"`
@@ -48,6 +49,8 @@ type rdapProvider struct {
 	cache   []rdapCacheEntry
 }
 
+// NewRDAPProvider returns an ownership provider using the RDAP HTTP API.
+// Nil or empty arguments select a restricted default client and public endpoint.
 func NewRDAPProvider(client *http.Client, baseURL string) Provider {
 	if client == nil {
 		client = &http.Client{

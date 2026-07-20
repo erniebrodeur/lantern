@@ -28,6 +28,7 @@ type activeRun struct {
 	toolRefs      map[string]int
 }
 
+// Manager coordinates scan execution, persistence, providers, and subscribers.
 type Manager struct {
 	store           Store
 	mu              sync.Mutex
@@ -42,6 +43,7 @@ type Manager struct {
 	providers       *providers.Registry
 }
 
+// NewManager constructs a manager with Lantern's default provider registry.
 func NewManager(store Store, nmapPath string) (*Manager, error) {
 	registry := providers.NewRegistry(runtime.GOOS, os.Getenv,
 		providers.NewDNSSDProvider(nil),
@@ -55,6 +57,7 @@ func NewManager(store Store, nmapPath string) (*Manager, error) {
 	return NewManagerWithProviders(store, nmapPath, registry)
 }
 
+// NewManagerWithProviders constructs a manager with an explicit provider registry.
 func NewManagerWithProviders(store Store, nmapPath string, registry *providers.Registry) (*Manager, error) {
 	privileged := runningPrivileged()
 	if registry == nil {
@@ -82,10 +85,12 @@ func NewManagerWithProviders(store Store, nmapPath string, registry *providers.R
 	return manager, nil
 }
 
+// Start begins a scan with the default profile.
 func (m *Manager) Start(ctx context.Context, rawTarget string) (Scan, error) {
 	return m.StartRequest(ctx, ScanRequest{Target: rawTarget, ProfileID: DefaultProfileID})
 }
 
+// StartRequest validates, persists, and asynchronously starts a scan.
 func (m *Manager) StartRequest(ctx context.Context, request ScanRequest) (Scan, error) {
 	target, err := ValidateTarget(request.Target)
 	if err != nil {
@@ -151,6 +156,7 @@ func (m *Manager) StartRequest(ctx context.Context, request ScanRequest) (Scan, 
 	return scan, nil
 }
 
+// Capabilities returns a snapshot of available scan features and providers.
 func (m *Manager) Capabilities() Capabilities {
 	capabilities := Capabilities{Privileged: m.privileged, OSDetection: m.privileged, ToolActivity: true}
 	if m.providers != nil {
@@ -172,6 +178,7 @@ func (m *Manager) Capabilities() Capabilities {
 	return capabilities
 }
 
+// RefreshProviders probes all providers and returns their current statuses.
 func (m *Manager) RefreshProviders(ctx context.Context) []providers.Status {
 	if m.providers == nil {
 		return []providers.Status{}
@@ -219,6 +226,7 @@ func containsArgument(arguments []string, target string) bool {
 	return false
 }
 
+// Profiles returns built-in and user-defined scan profiles.
 func (m *Manager) Profiles(ctx context.Context) ([]Profile, error) {
 	custom, err := m.store.ListProfiles(ctx)
 	if err != nil {
@@ -227,6 +235,7 @@ func (m *Manager) Profiles(ctx context.Context) ([]Profile, error) {
 	return append(BuiltInProfiles(), custom...), nil
 }
 
+// SaveProfile creates a profile or updates the user-defined profile identified by identifier.
 func (m *Manager) SaveProfile(ctx context.Context, identifier, argumentText string) (Profile, error) {
 	arguments, err := ParseArgumentText(argumentText)
 	if err != nil {
@@ -264,6 +273,7 @@ func (m *Manager) SaveProfile(ctx context.Context, identifier, argumentText stri
 	return profile, nil
 }
 
+// DeleteProfile removes a user-defined profile.
 func (m *Manager) DeleteProfile(ctx context.Context, identifier string) error {
 	if _, builtIn := BuiltInProfile(identifier); builtIn {
 		return fmt.Errorf("built-in profiles are immutable")
@@ -278,14 +288,17 @@ func (m *Manager) profile(ctx context.Context, identifier string) (Profile, erro
 	return m.store.GetProfile(ctx, identifier)
 }
 
+// List returns all scans in reverse chronological order.
 func (m *Manager) List(ctx context.Context) ([]Scan, error) {
 	return m.store.List(ctx)
 }
 
+// Get returns the scan identified by identifier.
 func (m *Manager) Get(ctx context.Context, identifier string) (Scan, error) {
 	return m.store.Get(ctx, identifier)
 }
 
+// ActiveTools returns an in-memory snapshot of tools active for a scan.
 func (m *Manager) ActiveTools(identifier string) []ToolActivity {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -301,6 +314,7 @@ func (m *Manager) ActiveTools(identifier string) []ToolActivity {
 	return tools
 }
 
+// ListTools merges stored provider runs with currently active tools.
 func (m *Manager) ListTools(ctx context.Context, identifier string) ([]ToolActivity, error) {
 	tools, err := m.store.ListTools(ctx, identifier)
 	if err != nil {
@@ -329,6 +343,7 @@ func (m *Manager) ListTools(ctx context.Context, identifier string) ([]ToolActiv
 	return tools, nil
 }
 
+// Delete removes a completed scan and its associated data.
 func (m *Manager) Delete(ctx context.Context, identifier string) error {
 	m.mu.Lock()
 	_, active := m.active[identifier]
@@ -339,6 +354,7 @@ func (m *Manager) Delete(ctx context.Context, identifier string) error {
 	return m.store.Delete(ctx, identifier)
 }
 
+// ListHosts returns a page of hosts observed by a scan.
 func (m *Manager) ListHosts(ctx context.Context, identifier string, limit, offset int) (HostPage, error) {
 	if _, err := m.store.Get(ctx, identifier); err != nil {
 		return HostPage{}, err
@@ -346,6 +362,7 @@ func (m *Manager) ListHosts(ctx context.Context, identifier string, limit, offse
 	return m.store.ListHosts(ctx, identifier, limit, offset)
 }
 
+// GetHost returns one host observation from a scan.
 func (m *Manager) GetHost(ctx context.Context, scanID string, hostID int64) (HostObservation, error) {
 	host, err := m.store.GetHost(ctx, scanID, hostID)
 	if err != nil || host.Ownership != nil {
@@ -394,6 +411,7 @@ func (m *Manager) providerHostnames(ctx context.Context, scanID, address string)
 	return hostnames
 }
 
+// Cancel requests cancellation of an active scan.
 func (m *Manager) Cancel(identifier string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -406,6 +424,7 @@ func (m *Manager) Cancel(identifier string) error {
 	return nil
 }
 
+// Subscribe streams events for one scan and returns an unsubscribe function.
 func (m *Manager) Subscribe(identifier string) (<-chan Event, func()) {
 	channel := make(chan Event, 128)
 	m.mu.Lock()
@@ -430,6 +449,7 @@ func (m *Manager) Subscribe(identifier string) (<-chan Event, func()) {
 
 // SubscribeAll receives persisted scan and host updates for every scan. Detailed
 // output, progress, and provider evidence remain on dedicated subscriptions.
+// SubscribeAll streams events for every scan and returns an unsubscribe function.
 func (m *Manager) SubscribeAll() (<-chan Event, func()) {
 	channel := make(chan Event, 128)
 	m.mu.Lock()
@@ -446,6 +466,7 @@ func (m *Manager) SubscribeAll() (<-chan Event, func()) {
 	}
 }
 
+// Shutdown cancels active work and waits until it finishes or ctx expires.
 func (m *Manager) Shutdown(ctx context.Context) {
 	m.mu.Lock()
 	m.closing = true
@@ -762,6 +783,7 @@ func (m *Manager) providerOwnership(ctx context.Context, scanID, address string)
 	return mergeOwnershipCandidates(candidates)
 }
 
+// ListEvidence returns provider evidence for a scan matching query.
 func (m *Manager) ListEvidence(ctx context.Context, scanID string, query providers.EvidenceQuery) ([]providers.Evidence, error) {
 	if _, err := m.store.Get(ctx, scanID); err != nil {
 		return nil, err
@@ -960,6 +982,7 @@ func newID() (string, error) {
 	return hex.EncodeToString(bytes), nil
 }
 
+// IsNotFound reports whether err represents a missing scan or profile.
 func IsNotFound(err error) bool {
 	return errors.Is(err, ErrNotFound)
 }

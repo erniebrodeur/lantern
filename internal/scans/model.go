@@ -8,8 +8,10 @@ import (
 	"github.com/erniebrodeur/lantern/internal/providers"
 )
 
+// Status is the lifecycle state of a scan.
 type Status string
 
+// Scan lifecycle states.
 const (
 	StatusQueued      Status = "queued"
 	StatusRunning     Status = "running"
@@ -20,11 +22,15 @@ const (
 )
 
 var (
-	ErrNotFound          = errors.New("scan not found")
-	ErrScanActive        = errors.New("an active scan cannot be deleted")
+	// ErrNotFound indicates that a requested scan or profile does not exist.
+	ErrNotFound = errors.New("scan not found")
+	// ErrScanActive indicates that an active scan cannot be deleted.
+	ErrScanActive = errors.New("an active scan cannot be deleted")
+	// ErrPrivilegeRequired indicates that a scan option needs elevated privileges.
 	ErrPrivilegeRequired = errors.New("OS detection requires privileged launch")
 )
 
+// Scan contains the persisted configuration, state, and summary of a scan.
 type Scan struct {
 	ID               string     `json:"id"`
 	Target           string     `json:"target"`
@@ -46,6 +52,7 @@ type Scan struct {
 	Ownership        *Ownership `json:"ownership,omitempty"`
 }
 
+// Profile is a reusable, validated set of Nmap arguments.
 type Profile struct {
 	ID           string     `json:"id"`
 	Label        string     `json:"label"`
@@ -56,6 +63,7 @@ type Profile struct {
 	UpdatedAt    *time.Time `json:"updatedAt,omitempty"`
 }
 
+// ScanRequest configures a new scan.
 type ScanRequest struct {
 	Target              string
 	ProfileID           string
@@ -63,6 +71,7 @@ type ScanRequest struct {
 	OSDetection         bool
 }
 
+// Capabilities describes the features and provider tools available at runtime.
 type Capabilities struct {
 	Privileged         bool               `json:"privileged"`
 	OSDetection        bool               `json:"osDetection"`
@@ -73,6 +82,7 @@ type Capabilities struct {
 	Providers          []providers.Status `json:"providers"`
 }
 
+// RouteHop is one observed hop on a route to a host.
 type RouteHop struct {
 	TTL       int     `json:"ttl"`
 	Address   string  `json:"address,omitempty"`
@@ -80,6 +90,7 @@ type RouteHop struct {
 	LatencyMS float64 `json:"latencyMs,omitempty"`
 }
 
+// HostRoute contains the discovered path to a target.
 type HostRoute struct {
 	Target string     `json:"target"`
 	Tool   string     `json:"tool,omitempty"`
@@ -87,11 +98,13 @@ type HostRoute struct {
 	Error  string     `json:"error,omitempty"`
 }
 
+// RouteMap groups the routes recorded for a scan.
 type RouteMap struct {
 	Tool   string      `json:"tool"`
 	Routes []HostRoute `json:"routes"`
 }
 
+// Result is the normalized summary of an Nmap XML document.
 type Result struct {
 	NmapVersion      string
 	XMLOutputVersion string
@@ -101,6 +114,7 @@ type Result struct {
 	Hosts            []HostObservation
 }
 
+// HostObservation is the normalized network data collected for one host.
 type HostObservation struct {
 	ID          int64                `json:"id"`
 	State       string               `json:"state"`
@@ -115,12 +129,14 @@ type HostObservation struct {
 	Evidence    []providers.Evidence `json:"evidence,omitempty"`
 }
 
+// OSMatch is an operating-system fingerprint reported by Nmap.
 type OSMatch struct {
 	Name     string    `json:"name"`
 	Accuracy int       `json:"accuracy"`
 	Classes  []OSClass `json:"classes,omitempty"`
 }
 
+// OSClass provides structured details for an operating-system match.
 type OSClass struct {
 	Type       string   `json:"type,omitempty"`
 	Vendor     string   `json:"vendor,omitempty"`
@@ -143,17 +159,20 @@ type Ownership struct {
 	Sources      []string `json:"sources,omitempty"`
 }
 
+// Address is a network address observed for a host.
 type Address struct {
 	Address string `json:"address"`
 	Type    string `json:"type"`
 	Vendor  string `json:"vendor,omitempty"`
 }
 
+// Hostname is a name associated with a host.
 type Hostname struct {
 	Name string `json:"name"`
 	Type string `json:"type,omitempty"`
 }
 
+// Port describes the state and detected service of a network port.
 type Port struct {
 	Protocol    string `json:"protocol"`
 	Number      int    `json:"number"`
@@ -168,6 +187,7 @@ type Port struct {
 	Tunnel      string `json:"tunnel,omitempty"`
 }
 
+// HostSummary is the compact host representation used in paginated lists.
 type HostSummary struct {
 	ID            int64  `json:"id"`
 	State         string `json:"state"`
@@ -180,6 +200,7 @@ type HostSummary struct {
 	Provisional   bool   `json:"provisional"`
 }
 
+// HostPage is one page of host summaries.
 type HostPage struct {
 	Items  []HostSummary `json:"items"`
 	Total  int           `json:"total"`
@@ -187,6 +208,7 @@ type HostPage struct {
 	Offset int           `json:"offset"`
 }
 
+// Event is a scan lifecycle, progress, tool, evidence, or output update.
 type Event struct {
 	Type     string              `json:"type"`
 	ScanID   string              `json:"scanId,omitempty"`
@@ -199,12 +221,14 @@ type Event struct {
 	Stream   string              `json:"stream,omitempty"`
 }
 
+// ToolActivity reports whether a tool is currently active for a scan.
 type ToolActivity struct {
 	ID     string `json:"id"`
 	Label  string `json:"label"`
 	Active bool   `json:"active"`
 }
 
+// Store persists scans and their profiles, hosts, routes, and evidence.
 type Store interface {
 	Create(context.Context, Scan) error
 	List(context.Context) ([]Scan, error)

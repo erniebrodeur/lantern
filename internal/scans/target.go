@@ -6,6 +6,7 @@ import (
 	"strings"
 )
 
+// ValidateTarget normalizes and validates an IP address, hostname, or CIDR scan target.
 func ValidateTarget(value string) (string, error) {
 	target := strings.TrimSpace(value)
 	if target == "" {

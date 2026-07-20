@@ -17,10 +17,12 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// API exposes scan management over Lantern's loopback-only HTTP interface.
 type API struct {
 	manager *scans.Manager
 }
 
+// NewRouter constructs the API and embedded-UI router for manager.
 func NewRouter(manager *scans.Manager) (*gin.Engine, error) {
 	router := gin.New()
 	router.Use(loopbackHostOnly(), gin.Logger(), gin.Recovery())

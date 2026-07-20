@@ -25,6 +25,7 @@ const (
 	maxMDNSAdvertisements = 512
 )
 
+// ServiceAdvertisement is the evidence payload for an mDNS service instance.
 type ServiceAdvertisement struct {
 	Instance       string            `json:"instance"`
 	ServiceType    string            `json:"serviceType"`
@@ -42,6 +43,7 @@ type dnsSDProvider struct {
 	path   string
 }
 
+// NewDNSSDProvider returns an mDNS provider backed by Apple's dns-sd tool.
 func NewDNSSDProvider(runner CommandRunner) Provider {
 	if runner == nil {
 		runner = ExecRunner{}
@@ -231,6 +233,7 @@ type avahiProvider struct {
 	path   string
 }
 
+// NewAvahiProvider returns an mDNS provider backed by avahi-browse.
 func NewAvahiProvider(runner CommandRunner) Provider {
 	if runner == nil {
 		runner = ExecRunner{}
