@@ -2,24 +2,28 @@
 
 [![CI](https://github.com/erniebrodeur/lantern/actions/workflows/ci.yml/badge.svg)](https://github.com/erniebrodeur/lantern/actions/workflows/ci.yml)
 
-Lantern turns Nmap scans into a local, time-aware 3D network map.
+Lantern is a local-first network intelligence workspace. It correlates devices,
+services, names, ownership, and routes into an interactive 3D map that you can
+revisit to see how a network changes over time.
 
-It runs on your machine, stores observations in SQLite, and keeps each scan as
-evidence you can revisit or compare later.
+Nmap supplies active discovery, but it is only one part of the observation
+pipeline. Lantern combines its results with local service discovery, DNS,
+internet registry data, and route topology, while preserving the supporting
+evidence in SQLite on your machine.
 
 > **Status:** Lantern is under active development. The current version is 0.2.0.
 
 ## Features
 
-- Background Nmap scans with live progress and cancellation
-- Multiple concurrent scans
-- Built-in and custom scan profiles
-- 3D address-space and traceroute views
-- Multi-scan temporal views without duplicate host spheres
-- Port, service, OS, reverse DNS, network profiles (RDAP with WHOIS fallback), and local DNS-SD evidence
-- One provider lifecycle for discovery, fallback, progress, logs, and evidence
-- Local SQLite storage
-- One binary with the web interface embedded
+- Correlated host discovery from active Nmap scans and local mDNS/DNS-SD advertisements
+- Port, service, product, OS, hostname, and MAC vendor evidence for each observed host
+- Reverse DNS and public network profiles from RDAP with WHOIS field fallback
+- Route topology from MTR or traceroute, rendered alongside hosts in 3D
+- Address-space, route-map, and multi-observation temporal views
+- Background and concurrent observations with live progress, tool activity, logs, and cancellation
+- Built-in scan profiles plus safely parsed custom Nmap arguments
+- Provider discovery, selection, fallback, and per-provider evidence history
+- Local SQLite persistence in a single binary with the web interface embedded
 
 ## Requirements
 
@@ -61,6 +65,15 @@ Show the compiled version:
 ```sh
 ./bin/lantern --version
 ```
+
+An observation runs several tools as one coordinated job. Nmap actively finds
+hosts and services while the platform's DNS-SD provider listens for advertised
+local services. Observed addresses are enriched with reverse DNS and, for public
+networks, RDAP and WHOIS registration data. Selecting the Map view adds route
+evidence through MTR or traceroute when either is installed.
+
+Provider results, progress, and logs remain attached to the observation instead
+of being flattened into a one-time scan report.
 
 Lantern includes four scan profiles:
 
