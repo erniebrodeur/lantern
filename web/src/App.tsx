@@ -1257,8 +1257,19 @@ function OwnershipCard({ ownership }: { ownership: Ownership }) {
 }
 
 function ownershipLocation(ownership: Ownership): string | undefined {
-  const location = [ownership.city, ownership.region, ownership.country].filter(Boolean).join(", ");
+  const location = [ownership.city, ownership.region, formatCountry(ownership.country)].filter(Boolean).join(", ");
   return location || undefined;
+}
+
+function formatCountry(country?: string): string | undefined {
+  const value = country?.trim();
+  if (!value || !/^[a-z]{2}$/i.test(value)) return value;
+
+  try {
+    return new Intl.DisplayNames(navigator.languages, { type: "region" }).of(value.toUpperCase()) ?? value;
+  } catch {
+    return value;
+  }
 }
 
 function formatNetworkProfileSource(source: string): string {
