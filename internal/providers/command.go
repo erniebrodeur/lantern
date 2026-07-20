@@ -1,0 +1,106 @@
+package providers
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"strings"
+	"time"
+)
+
+var ErrOutputLimit = errors.New("provider output exceeded its limit")
+
+type CommandResult struct {
+	Stdout []byte
+	Stderr []byte
+}
+
+type CommandRunner interface {
+	Run(context.Context, string, []string, time.Duration, int) (CommandResult, error)
+}
+
+type ExecRunner struct{}
+
+func ResolveExecutable(configured, fallback string, standardPaths []string) string {
+	configured = strings.TrimSpace(configured)
+	if configured != "" {
+		if path, err := exec.LookPath(configured); err == nil {
+			return path
+		}
+		return ""
+	}
+	if path, err := exec.LookPath(fallback); err == nil {
+		return path
+	}
+	for _, path := range standardPaths {
+		info, err := os.Stat(path)
+		if err == nil && !info.IsDir() && info.Mode().Perm()&0o111 != 0 {
+			return path
+		}
+	}
+	return ""
+}
+
+func CommandContext(ctx context.Context, path string, arguments ...string) *exec.Cmd {
+	// Paths come from provider probes and arguments cross typed validation
+	// boundaries. Providers never invoke a shell.
+	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
+	command := exec.CommandContext(ctx, path, arguments...)
+	configureProcess(command)
+	return command
+}
+
+func (ExecRunner) Run(parent context.Context, path string, arguments []string, timeout time.Duration, maxOutputBytes int) (CommandResult, error) {
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
+	stdout := newCappedBuffer(maxOutputBytes)
+	stderr := newCappedBuffer(maxOutputBytes)
+	command := CommandContext(ctx, path, arguments...)
+	command.Stdout = stdout
+	command.Stderr = stderr
+	err := command.Run()
+	result := CommandResult{Stdout: stdout.Bytes(), Stderr: stderr.Bytes()}
+	if stdout.truncated || stderr.truncated {
+		return result, ErrOutputLimit
+	}
+	if ctx.Err() != nil {
+		return result, ctx.Err()
+	}
+	if err != nil {
+		return result, fmt.Errorf("run %s: %w", path, err)
+	}
+	return result, nil
+}
+
+type cappedBuffer struct {
+	buffer    bytes.Buffer
+	remaining int
+	truncated bool
+}
+
+func newCappedBuffer(limit int) *cappedBuffer {
+	if limit < 0 {
+		limit = 0
+	}
+	return &cappedBuffer{remaining: limit}
+}
+
+func (b *cappedBuffer) Write(data []byte) (int, error) {
+	original := len(data)
+	if len(data) > b.remaining {
+		data = data[:b.remaining]
+		b.truncated = true
+	}
+	if len(data) > 0 {
+		_, _ = b.buffer.Write(data)
+		b.remaining -= len(data)
+	}
+	return original, nil
+}
+
+func (b *cappedBuffer) Bytes() []byte {
+	return append([]byte(nil), b.buffer.Bytes()...)
+}
