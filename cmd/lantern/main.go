@@ -19,6 +19,11 @@ import (
 
 const shutdownTimeout = 5 * time.Second
 
+var (
+	listenAndServe = func(server *http.Server) error { return server.ListenAndServe() }
+	shutdownServer = func(server *http.Server, ctx context.Context) error { return server.Shutdown(ctx) }
+)
+
 func main() {
 	if len(os.Args) == 2 && (os.Args[1] == "--version" || os.Args[1] == "-version") {
 		fmt.Println(version.Value)
@@ -30,6 +35,12 @@ func main() {
 }
 
 func run() (resultErr error) {
+	signalContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return runContext(signalContext)
+}
+
+func runContext(signalContext context.Context) (resultErr error) {
 	address := config.EnvOrDefault("LANTERN_ADDR", "127.0.0.1:1414")
 	databaseConfig, err := config.DatabaseFromEnvironment()
 	if err != nil {
@@ -66,11 +77,8 @@ func run() (resultErr error) {
 	serverErrors := make(chan error, 1)
 	go func() {
 		log.Printf("Lantern API listening on http://%s", address)
-		serverErrors <- server.ListenAndServe()
+		serverErrors <- listenAndServe(server)
 	}()
-
-	signalContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	select {
 	case err := <-serverErrors:
@@ -85,7 +93,10 @@ func run() (resultErr error) {
 	defer cancel()
 
 	manager.Shutdown(shutdownContext)
-	if err := server.Shutdown(shutdownContext); err != nil && !errors.Is(err, context.Canceled) {
+	if err := shutdownServer(server, shutdownContext); err != nil && !errors.Is(err, context.Canceled) {
+		return err
+	}
+	if err := <-serverErrors; err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
 

@@ -149,6 +149,16 @@ make check
 
 `make check` builds the frontend, runs the Go test suite, and runs `go vet`.
 
+Generate a Go coverage profile and a browsable, line-by-line HTML report:
+
+```sh
+make coverage
+open coverage.html # use xdg-open on Linux
+```
+
+Both `make check` and `make coverage` require at least 80% statement coverage
+in every executable Go source file.
+
 For frontend development:
 
 ```sh

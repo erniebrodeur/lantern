@@ -1,0 +1,28 @@
+#!/bin/sh
+set -eu
+
+profile=${1:-coverage.txt}
+minimum=${2:-80}
+
+awk -v minimum="$minimum" '
+NR == 1 { next }
+{
+	file = $1
+	sub(/:[0-9]+\..*$/, "", file)
+	total[file] += $2
+	if ($3 > 0) {
+		covered[file] += $2
+	}
+}
+END {
+	failed = 0
+	for (file in total) {
+		percent = 100 * covered[file] / total[file]
+		if (percent + 0.0000001 < minimum) {
+			printf "coverage %.2f%% < %.2f%%: %s\n", percent, minimum, file > "/dev/stderr"
+			failed = 1
+		}
+	}
+	exit failed
+}
+' "$profile"

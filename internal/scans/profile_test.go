@@ -89,3 +89,48 @@ func TestResolveArgumentsSkipsDiscoveryForSingleIPPortScans(t *testing.T) {
 		}
 	}
 }
+
+func TestParseArgumentTextErrors(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{name: "empty", value: "  ", want: "required"},
+		{name: "too long", value: strings.Repeat("x", 8193), want: "too long"},
+		{name: "null", value: "-sT\x00", want: "null byte"},
+		{name: "unfinished escape", value: `-sT \`, want: "unfinished escape"},
+		{name: "unclosed single quote", value: `-p '80`, want: "unclosed quote"},
+		{name: "unclosed double quote", value: `-p "80`, want: "unclosed quote"},
+		{name: "too many", value: strings.Repeat("x ", 257), want: "too many"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := ParseArgumentText(test.value)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("ParseArgumentText() error = %v, want %q", err, test.want)
+			}
+		})
+	}
+	arguments, err := ParseArgumentText(`-sT "" '' escaped\ value`)
+	if err != nil || !reflect.DeepEqual(arguments, []string{"-sT", "", "", "escaped value"}) {
+		t.Fatalf("empty/escaped arguments = %#v, %v", arguments, err)
+	}
+}
+
+func TestValidateArgumentsErrors(t *testing.T) {
+	t.Parallel()
+	tooMany := make([]string, 257)
+	if err := ValidateArguments(tooMany); err == nil || !strings.Contains(err.Error(), "too many") {
+		t.Fatalf("too many error = %v", err)
+	}
+	if err := ValidateArguments([]string{"-sT", "bad\x00value"}); err == nil || !strings.Contains(err.Error(), "null byte") {
+		t.Fatalf("null error = %v", err)
+	}
+	for _, argument := range []string{"-oX", "-oNresult", "-oG", "-oSresult", "-oA", "--resume", "--append-output", "--stats-every", "--stats-every=2s"} {
+		if err := ValidateArguments([]string{argument}); err == nil || !strings.Contains(err.Error(), "Lantern owns") {
+			t.Fatalf("ValidateArguments(%q) = %v", argument, err)
+		}
+	}
+}

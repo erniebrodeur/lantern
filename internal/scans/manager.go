@@ -164,7 +164,10 @@ func (m *Manager) Capabilities() Capabilities {
 	} else {
 		capabilities.Providers = make([]providers.Status, 0)
 	}
-	routes := m.providers.ResolveAll("route")
+	var routes []providers.Selection
+	if m.providers != nil {
+		routes = m.providers.ResolveAll("route")
+	}
 	if len(routes) > 0 {
 		capabilities.RouteMapping = true
 		names := make([]string, 0, len(routes))
