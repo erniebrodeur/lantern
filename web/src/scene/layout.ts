@@ -408,8 +408,7 @@ export function sceneExtent(nodes: SceneNode[], groups: SceneGroup[] = [], focus
 function positionFor(style: SceneStyle, index: number, count: number, state: SceneNodeState, openPortCount: number): [number, number, number] {
   const progress = count <= 1 ? 0.5 : index / (count - 1);
   if (style === "original" || style === "map") {
-    const shellRadius = 6 * (0.78 + ((index * 37) % 19) / 100);
-    return constellationPoint(index, count, shellRadius, progress);
+    return constellationPoint(index, count, 6, progress);
   }
   return [0, 0, 0];
 }
