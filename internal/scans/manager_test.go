@@ -446,6 +446,47 @@ func TestManagerPersistsObservationBeforeScanCompletes(t *testing.T) {
 	t.Fatal("host observation was not durable while scan remained active")
 }
 
+func TestManagerPreservesObservationsFromFailedScan(t *testing.T) {
+	directory := t.TempDir()
+	script := filepath.Join(directory, "partial-nmap")
+	partialXML := strings.Split(sampleNmapXML, "<runstats>")[0]
+	contents := "#!/bin/sh\nprintf '%s' '" + partialXML + "'\nexit 7\n"
+	if err := os.WriteFile(script, []byte(contents), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	database, err := store.Open(filepath.Join(directory, "lantern.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close() })
+	manager, err := scans.NewManager(database, script)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		manager.Shutdown(ctx)
+	})
+
+	started, err := manager.Start(context.Background(), "192.168.1.0/24")
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed := waitForStatus(t, manager, started.ID, scans.StatusFailed, 3*time.Second)
+	if failed.HostsUp != 1 || failed.HostsTotal != 1 || failed.ExitCode == nil || *failed.ExitCode != 7 {
+		t.Fatalf("failed scan lost its partial state: %#v", failed)
+	}
+	page, err := manager.ListHosts(context.Background(), started.ID, 20, 0)
+	if err != nil || page.Total != 1 || page.Items[0].Address != "192.168.1.42" || page.Items[0].OpenPortCount != 1 {
+		t.Fatalf("failed scan lost its completed host: %#v, %v", page, err)
+	}
+	evidence, err := manager.ListEvidence(context.Background(), started.ID, providers.EvidenceQuery{Kind: "scan.summary", Limit: 20})
+	if err != nil || len(evidence) != 1 || !strings.Contains(string(evidence[0].Payload), `"partial":true`) {
+		t.Fatalf("failed scan lost its partial summary: %#v, %v", evidence, err)
+	}
+}
+
 func waitForStatus(t *testing.T, manager *scans.Manager, identifier string, wanted scans.Status, timeout time.Duration) scans.Scan {
 	t.Helper()
 	deadline := time.Now().Add(timeout)

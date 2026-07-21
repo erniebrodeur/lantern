@@ -42,6 +42,32 @@ func TestParseNmapXMLRejectsIncompleteScan(t *testing.T) {
 	}
 }
 
+func TestParseNmapXMLReturnsCompletedHostsFromIncompleteScan(t *testing.T) {
+	input := strings.Replace(sampleNmapXML, "  <runstats>", `  <host><status state="up"/><address addr="192.168.1.99" addrtype="ipv4"/>`, 1)
+	var observations []scans.HostObservation
+	result, err := scans.ParseNmapXMLIncremental(strings.NewReader(input), nil, func(host scans.HostObservation) error {
+		observations = append(observations, host)
+		return nil
+	})
+	if err == nil {
+		t.Fatal("expected malformed trailing host to fail")
+	}
+	if len(result.Hosts) != 1 || len(observations) != 1 || observations[0].Addresses[0].Address != "192.168.1.42" {
+		t.Fatalf("completed observations were discarded: result=%#v callbacks=%#v", result.Hosts, observations)
+	}
+}
+
+func TestParseNmapXMLReturnsSummaryFromFailedRun(t *testing.T) {
+	input := strings.Replace(sampleNmapXML, `exit="success"`, `exit="error"`, 1)
+	result, err := scans.ParseNmapXML(strings.NewReader(input))
+	if err == nil {
+		t.Fatal("expected failed Nmap run to fail")
+	}
+	if len(result.Hosts) != 1 || result.HostsUp != 1 || result.HostsTotal != 2 {
+		t.Fatalf("failed run discarded its partial result: %#v", result)
+	}
+}
+
 func TestParseNmapXMLRejectsNestedNmapDocument(t *testing.T) {
 	_, err := scans.ParseNmapXML(strings.NewReader(`<wrapper><nmaprun scanner="nmap"><runstats><finished exit="success"/><hosts/></runstats></nmaprun></wrapper>`))
 	if err == nil {

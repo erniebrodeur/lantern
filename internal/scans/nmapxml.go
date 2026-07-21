@@ -95,52 +95,52 @@ func ParseNmapXMLIncremental(reader io.Reader, onProgress func(Progress), onHost
 			break
 		}
 		if err != nil {
-			return Result{}, fmt.Errorf("parse Nmap XML: %w", err)
+			return result, fmt.Errorf("parse Nmap XML: %w", err)
 		}
 		switch element := token.(type) {
 		case xml.StartElement:
 			if !seenRoot && element.Name.Local != "nmaprun" {
-				return Result{}, fmt.Errorf("unexpected Nmap XML document root %q", element.Name.Local)
+				return result, fmt.Errorf("unexpected Nmap XML document root %q", element.Name.Local)
 			}
 			switch element.Name.Local {
 			case "nmaprun":
 				if seenRoot {
-					return Result{}, fmt.Errorf("unexpected nested Nmap XML document")
+					return result, fmt.Errorf("unexpected nested Nmap XML document")
 				}
 				seenRoot = true
 				scanner := attribute(element.Attr, "scanner")
 				if scanner != "nmap" {
-					return Result{}, fmt.Errorf("unexpected Nmap XML document")
+					return result, fmt.Errorf("unexpected Nmap XML document")
 				}
 				result.NmapVersion = attribute(element.Attr, "version")
 				result.XMLOutputVersion = attribute(element.Attr, "xmloutputversion")
 			case "host":
 				var host nmapHost
 				if err := decoder.DecodeElement(&host, &element); err != nil {
-					return Result{}, fmt.Errorf("parse Nmap host: %w", err)
+					return result, fmt.Errorf("parse Nmap host: %w", err)
 				}
 				observation, err := normalizeHost(host, false)
 				if err != nil {
-					return Result{}, err
+					return result, err
 				}
 				result.Hosts = append(result.Hosts, observation)
 				if onHost != nil {
 					if err := onHost(observation); err != nil {
-						return Result{}, fmt.Errorf("save Nmap host: %w", err)
+						return result, fmt.Errorf("save Nmap host: %w", err)
 					}
 				}
 			case "hosthint":
 				var host nmapHost
 				if err := decoder.DecodeElement(&host, &element); err != nil {
-					return Result{}, fmt.Errorf("parse Nmap host hint: %w", err)
+					return result, fmt.Errorf("parse Nmap host hint: %w", err)
 				}
 				observation, err := normalizeHost(host, true)
 				if err != nil {
-					return Result{}, err
+					return result, err
 				}
 				if onHost != nil {
 					if err := onHost(observation); err != nil {
-						return Result{}, fmt.Errorf("save Nmap host hint: %w", err)
+						return result, fmt.Errorf("save Nmap host hint: %w", err)
 					}
 				}
 			case "taskprogress":
@@ -153,9 +153,12 @@ func ParseNmapXMLIncremental(reader io.Reader, onProgress func(Progress), onHost
 				}
 			case "runstats":
 				if err := decoder.DecodeElement(&runStats, &element); err != nil {
-					return Result{}, fmt.Errorf("parse Nmap run statistics: %w", err)
+					return result, fmt.Errorf("parse Nmap run statistics: %w", err)
 				}
 				seenRunStats = true
+				result.HostsUp = runStats.Hosts.Up
+				result.HostsDown = runStats.Hosts.Down
+				result.HostsTotal = runStats.Hosts.Total
 			}
 		case xml.EndElement:
 			if element.Name.Local == "nmaprun" {
@@ -164,14 +167,11 @@ func ParseNmapXMLIncremental(reader io.Reader, onProgress func(Progress), onHost
 		}
 	}
 	if !seenRoot || !closedRoot || !seenRunStats {
-		return Result{}, fmt.Errorf("incomplete Nmap XML document")
+		return result, fmt.Errorf("incomplete Nmap XML document")
 	}
 	if runStats.Finished.Exit != "success" {
-		return Result{}, fmt.Errorf("Nmap XML did not report a successful scan")
+		return result, fmt.Errorf("Nmap XML did not report a successful scan")
 	}
-	result.HostsUp = runStats.Hosts.Up
-	result.HostsDown = runStats.Hosts.Down
-	result.HostsTotal = runStats.Hosts.Total
 	return result, nil
 }
 

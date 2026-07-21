@@ -26,6 +26,7 @@ type nmapSummary struct {
 	HostsDown        int    `json:"hostsDown"`
 	HostsTotal       int    `json:"hostsTotal"`
 	Observations     int    `json:"observations"`
+	Partial          bool   `json:"partial,omitempty"`
 }
 
 func newNmapProvider(configuredPath string) providers.Provider {
@@ -123,6 +124,31 @@ func (p *nmapProvider) Run(parent context.Context, request providers.Request, em
 	if err := emit(providers.Event{Type: "complete", ExitCode: &exitCode}); err != nil && parseErr == nil {
 		parseErr = err
 	}
+	summary := nmapSummary{
+		NmapVersion: result.NmapVersion, XMLOutputVersion: result.XMLOutputVersion,
+		HostsUp: result.HostsUp, HostsDown: result.HostsDown, HostsTotal: result.HostsTotal,
+		Observations: len(result.Hosts), Partial: waitErr != nil || parseErr != nil,
+	}
+	if summary.HostsTotal == 0 && len(result.Hosts) > 0 {
+		for _, host := range result.Hosts {
+			summary.HostsTotal++
+			if host.State == "up" {
+				summary.HostsUp++
+			} else if host.State == "down" {
+				summary.HostsDown++
+			}
+		}
+	}
+	payload, summaryErr := json.Marshal(summary)
+	if summaryErr == nil {
+		summaryErr = emit(providers.Event{Type: "evidence", Evidence: &providers.Evidence{
+			Kind: "scan.summary", Subject: providers.EntityRef{Type: "scan-target", Key: request.Target},
+			PayloadVersion: 1, Payload: payload, ObservedAt: time.Now().UTC(), Confidence: 1,
+		}})
+	}
+	if summaryErr != nil && parseErr == nil {
+		parseErr = summaryErr
+	}
 	if parent.Err() != nil {
 		return parent.Err()
 	}
@@ -132,17 +158,5 @@ func (p *nmapProvider) Run(parent context.Context, request providers.Request, em
 	if parseErr != nil {
 		return parseErr
 	}
-	summary := nmapSummary{
-		NmapVersion: result.NmapVersion, XMLOutputVersion: result.XMLOutputVersion,
-		HostsUp: result.HostsUp, HostsDown: result.HostsDown, HostsTotal: result.HostsTotal,
-		Observations: len(result.Hosts),
-	}
-	payload, err := json.Marshal(summary)
-	if err != nil {
-		return err
-	}
-	return emit(providers.Event{Type: "evidence", Evidence: &providers.Evidence{
-		Kind: "scan.summary", Subject: providers.EntityRef{Type: "scan-target", Key: request.Target},
-		PayloadVersion: 1, Payload: payload, ObservedAt: time.Now().UTC(), Confidence: 1,
-	}})
+	return nil
 }
