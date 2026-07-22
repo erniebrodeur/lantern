@@ -19,7 +19,10 @@ import (
 	"github.com/erniebrodeur/lantern/internal/providers"
 )
 
-const maxOutputLineBytes = 1024 * 1024
+const (
+	maxOutputLineBytes       = 1024 * 1024
+	maxHTTPSCertificatePorts = 8
+)
 
 type activeRun struct {
 	cancel        context.CancelFunc
@@ -51,6 +54,7 @@ func NewManager(store Store, nmapPath string) (*Manager, error) {
 		providers.NewRDAPProvider(nil, ""),
 		providers.NewWHOISProvider(nil, os.Getenv("LANTERN_WHOIS_PATH")),
 		providers.NewReverseDNSProvider(nil),
+		providers.NewTLSCertificateProvider(nil),
 		providers.NewMTRProvider(nil),
 		providers.NewTracerouteProvider(nil),
 	)
@@ -414,6 +418,53 @@ func (m *Manager) providerHostnames(ctx context.Context, scanID, address string)
 	return hostnames
 }
 
+func (m *Manager) providerCertificateHostnames(ctx context.Context, scanID, address string, ports []Port) []Hostname {
+	if m.providers == nil {
+		return nil
+	}
+	provider, _, ok := m.providers.Resolve("tls-certificate")
+	if !ok {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	hostnames := make([]Hostname, 0)
+	for _, port := range httpsPorts(ports) {
+		_, err := m.runProvider(ctx, scanID, providers.Request{
+			Target: address, Options: map[string]string{"port": fmt.Sprint(port)},
+		}, provider, func(event providers.Event) error {
+			if event.Evidence == nil || event.Evidence.Kind != "tls.certificate" {
+				return nil
+			}
+			var certificate providers.TLSCertificate
+			if err := json.Unmarshal(event.Evidence.Payload, &certificate); err != nil {
+				return fmt.Errorf("decode TLS certificate: %w", err)
+			}
+			names := certificate.DNSNames
+			hostnameType := "TLS_SAN"
+			if len(names) == 0 && certificate.CommonName != "" {
+				names = []string{certificate.CommonName}
+				hostnameType = "TLS_CN"
+			}
+			for _, name := range names {
+				name = normalizeUsableHostname(name)
+				if name == "" {
+					continue
+				}
+				if _, exists := seen[name]; exists {
+					continue
+				}
+				seen[name] = struct{}{}
+				hostnames = append(hostnames, Hostname{Name: name, Type: hostnameType})
+			}
+			return nil
+		})
+		if err != nil && ctx.Err() != nil {
+			return hostnames
+		}
+	}
+	return hostnames
+}
+
 // Cancel requests cancellation of an active scan.
 func (m *Manager) Cancel(identifier string) error {
 	m.mu.Lock()
@@ -566,14 +617,18 @@ func (m *Manager) execute(ctx context.Context, scan Scan) {
 				if current, err := m.store.Get(context.Background(), scan.ID); err == nil {
 					m.publish(scan.ID, Event{Type: "scan", Scan: &current})
 				}
-				if address, ok := hostIPAddress(saved); ok {
+				if !saved.Provisional {
+					address, ok := hostIPAddress(saved)
+					if !ok {
+						break
+					}
 					key := address.Type + ":" + address.Address
 					if _, loaded := enrichmentStarted.LoadOrStore(key, struct{}{}); !loaded {
 						enrichments.Add(1)
-						go func() {
+						go func(host HostObservation) {
 							defer enrichments.Done()
-							m.enrichHost(ctx, scan.ID, address)
-						}()
+							m.enrichHost(ctx, scan.ID, host)
+						}(saved)
 					}
 				}
 			case "scan.summary":
@@ -830,27 +885,42 @@ func (m *Manager) providerTargetEligible(target string) bool {
 	return false
 }
 
-func (m *Manager) enrichHost(ctx context.Context, scanID string, address Address) {
+func (m *Manager) enrichHost(ctx context.Context, scanID string, host HostObservation) {
 	select {
 	case m.enrichmentSlots <- struct{}{}:
 		defer func() { <-m.enrichmentSlots }()
 	case <-ctx.Done():
 		return
 	}
+	address, ok := hostIPAddress(host)
+	if !ok {
+		return
+	}
 	var hostnames []Hostname
+	var certificateHostnames []Hostname
 	var ownership *Ownership
 	var lookups sync.WaitGroup
-	lookups.Add(2)
+	lookups.Add(3)
 	go func() {
 		defer lookups.Done()
 		hostnames = m.providerHostnames(ctx, scanID, address.Address)
 	}()
 	go func() {
 		defer lookups.Done()
+		certificateHostnames = m.providerCertificateHostnames(ctx, scanID, address.Address, host.Ports)
+	}()
+	go func() {
+		defer lookups.Done()
 		ownership = m.providerOwnership(ctx, scanID, address.Address)
 	}()
 	lookups.Wait()
+	hostnames = mergeHostnames(certificateHostnames, hostnames)
 	if len(hostnames) == 0 && ownership == nil {
+		if len(httpsPorts(host.Ports)) > 0 {
+			if refreshed, err := m.store.GetHost(context.Background(), scanID, host.ID); err == nil {
+				m.publish(scanID, Event{Type: "host", Host: &refreshed})
+			}
+		}
 		return
 	}
 	saved, err := m.store.SaveHostEnrichment(context.Background(), scanID, address, hostnames, ownership)
@@ -861,6 +931,70 @@ func (m *Manager) enrichHost(ctx context.Context, scanID string, address Address
 		return
 	}
 	m.publish(scanID, Event{Type: "host", Host: &saved})
+}
+
+func httpsPorts(ports []Port) []int {
+	seen := make(map[int]struct{})
+	result := make([]int, 0)
+	for _, port := range ports {
+		if port.Protocol != "tcp" || port.State != "open" {
+			continue
+		}
+		service := strings.ToLower(strings.TrimSpace(port.Service))
+		tunnel := strings.ToLower(strings.TrimSpace(port.Tunnel))
+		https := port.Number == 443 || service == "https" || strings.HasPrefix(service, "https-") ||
+			strings.HasPrefix(service, "ssl/http") || (tunnel == "ssl" && (service == "http" || strings.HasPrefix(service, "http-")))
+		if !https {
+			continue
+		}
+		if _, exists := seen[port.Number]; exists {
+			continue
+		}
+		seen[port.Number] = struct{}{}
+		result = append(result, port.Number)
+	}
+	sort.Ints(result)
+	if len(result) > maxHTTPSCertificatePorts {
+		result = result[:maxHTTPSCertificatePorts]
+	}
+	return result
+}
+
+func normalizeUsableHostname(value string) string {
+	value = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(value), "."))
+	if value == "" || len(value) > 253 || strings.Contains(value, "*") {
+		return ""
+	}
+	if _, err := netip.ParseAddr(value); err == nil {
+		return ""
+	}
+	for _, label := range strings.Split(value, ".") {
+		if len(label) < 1 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return ""
+		}
+		for _, character := range label {
+			if (character < 'a' || character > 'z') && (character < '0' || character > '9') && character != '-' {
+				return ""
+			}
+		}
+	}
+	return value
+}
+
+func mergeHostnames(groups ...[]Hostname) []Hostname {
+	seen := make(map[string]struct{})
+	var result []Hostname
+	for _, group := range groups {
+		for _, hostname := range group {
+			key := strings.ToLower(hostname.Name)
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			result = append(result, hostname)
+		}
+	}
+	return result
 }
 
 func (m *Manager) enrichScanOwnership(ctx context.Context, scanID, address string) {

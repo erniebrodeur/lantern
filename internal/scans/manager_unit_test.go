@@ -32,6 +32,7 @@ type stubStore struct {
 	savedEvidence    providers.Evidence
 	ensuredAddress   Address
 	ensuredHostnames []Hostname
+	savedHostnames   []Hostname
 }
 
 func (s *stubStore) InterruptRunning(context.Context, time.Time) error { return s.err }
@@ -58,7 +59,8 @@ func (s *stubStore) ListHosts(context.Context, string, int, int) (HostPage, erro
 func (s *stubStore) GetHost(context.Context, string, int64) (HostObservation, error) {
 	return s.host, s.err
 }
-func (s *stubStore) SaveHostEnrichment(context.Context, string, Address, []Hostname, *Ownership) (HostObservation, error) {
+func (s *stubStore) SaveHostEnrichment(_ context.Context, _ string, _ Address, hostnames []Hostname, _ *Ownership) (HostObservation, error) {
+	s.savedHostnames = append([]Hostname(nil), hostnames...)
 	return s.host, s.err
 }
 func (s *stubStore) SaveScanOwnership(context.Context, string, *Ownership) (Scan, error) {
@@ -373,6 +375,92 @@ func TestManagerProviderObservationAndHelpers(t *testing.T) {
 	}
 	if !IsNotFound(ErrNotFound) || IsNotFound(errors.New("other")) {
 		t.Fatal("IsNotFound mismatch")
+	}
+}
+
+func TestHTTPSPortsAndCertificateHostnameNormalization(t *testing.T) {
+	ports := []Port{
+		{Protocol: "tcp", Number: 443, State: "open"},
+		{Protocol: "tcp", Number: 8443, State: "open", Service: "https-alt"},
+		{Protocol: "tcp", Number: 9443, State: "open", Service: "http", Tunnel: "ssl"},
+		{Protocol: "tcp", Number: 10443, State: "open", Service: "ssl/http"},
+		{Protocol: "tcp", Number: 443, State: "open", Service: "https"},
+		{Protocol: "udp", Number: 443, State: "open", Service: "https"},
+		{Protocol: "tcp", Number: 4433, State: "closed", Service: "https"},
+		{Protocol: "tcp", Number: 80, State: "open", Service: "http"},
+	}
+	if got := httpsPorts(ports); len(got) != 4 || got[0] != 443 || got[1] != 8443 || got[2] != 9443 || got[3] != 10443 {
+		t.Fatalf("HTTPS ports = %#v", got)
+	}
+	valid := map[string]string{"Router.Example.": "router.example", "xn--bcher-kva.example": "xn--bcher-kva.example"}
+	for input, want := range valid {
+		if got := normalizeUsableHostname(input); got != want {
+			t.Fatalf("normalize %q = %q", input, got)
+		}
+	}
+	for _, input := range []string{"*.example", "192.0.2.1", "bad_name.example", "-bad.example", "bad..example"} {
+		if got := normalizeUsableHostname(input); got != "" {
+			t.Fatalf("invalid hostname %q normalized to %q", input, got)
+		}
+	}
+	merged := mergeHostnames([]Hostname{{Name: "one.example", Type: "PTR"}}, []Hostname{{Name: "ONE.EXAMPLE", Type: "TLS_SAN"}, {Name: "two.example", Type: "TLS_SAN"}})
+	if len(merged) != 2 || merged[0].Type != "PTR" || merged[1].Name != "two.example" {
+		t.Fatalf("merged hostnames = %#v", merged)
+	}
+}
+
+func TestManagerCollectsCertificateHostnames(t *testing.T) {
+	store := &stubStore{}
+	provider := unitProvider{
+		descriptor: providers.Descriptor{ID: "tls-certificate", Capability: "tls-certificate", SupportedOS: []string{runtime.GOOS}, OSPriorities: map[string]int{runtime.GOOS: 100}},
+		status:     providers.Status{ProviderID: "tls-certificate", Available: true, Status: "available"},
+		run: func(_ context.Context, request providers.Request, emit providers.EmitFunc) error {
+			payload, _ := json.Marshal(providers.TLSCertificate{
+				Port: 8443, DNSNames: []string{"host.example", "*.example", "192.0.2.1"}, CommonName: "ignored.example",
+			})
+			if request.Options["port"] != "8443" {
+				t.Fatalf("port option = %#v", request.Options)
+			}
+			return emit(providers.Event{Type: "evidence", Evidence: &providers.Evidence{
+				Kind: "tls.certificate", Subject: providers.EntityRef{Type: "address", Key: request.Target}, PayloadVersion: 1, Payload: payload, ObservedAt: time.Now(), Confidence: .95,
+			}})
+		},
+	}
+	registry := providers.NewRegistry(runtime.GOOS, nil, provider)
+	registry.Refresh(context.Background())
+	manager := unitManager(store, registry)
+	manager.active["scan"] = &activeRun{tools: make(map[string]ToolActivity), toolRefs: make(map[string]int)}
+	hostnames := manager.providerCertificateHostnames(context.Background(), "scan", "192.0.2.1", []Port{{Protocol: "tcp", Number: 8443, State: "open", Service: "https"}})
+	if len(hostnames) != 1 || hostnames[0].Name != "host.example" || hostnames[0].Type != "TLS_SAN" {
+		t.Fatalf("hostnames = %#v", hostnames)
+	}
+	if store.savedEvidence.Kind != "tls.certificate" || store.createdRun.Capability != "tls-certificate" {
+		t.Fatalf("stored evidence/run = %#v %#v", store.savedEvidence, store.createdRun)
+	}
+}
+
+func TestManagerEnrichesHostFromHTTPSCertificate(t *testing.T) {
+	store := &stubStore{host: HostObservation{ID: 9}}
+	provider := unitProvider{
+		descriptor: providers.Descriptor{ID: "tls-certificate", Capability: "tls-certificate", SupportedOS: []string{runtime.GOOS}, OSPriorities: map[string]int{runtime.GOOS: 100}},
+		status:     providers.Status{ProviderID: "tls-certificate", Available: true, Status: "available"},
+		run: func(_ context.Context, request providers.Request, emit providers.EmitFunc) error {
+			payload, _ := json.Marshal(providers.TLSCertificate{Port: 443, DNSNames: []string{"console.example"}})
+			return emit(providers.Event{Type: "evidence", Evidence: &providers.Evidence{
+				Kind: "tls.certificate", Subject: providers.EntityRef{Type: "address", Key: request.Target}, PayloadVersion: 1, Payload: payload, ObservedAt: time.Now(), Confidence: .95,
+			}})
+		},
+	}
+	registry := providers.NewRegistry(runtime.GOOS, nil, provider)
+	registry.Refresh(context.Background())
+	manager := unitManager(store, registry)
+	manager.active["scan"] = &activeRun{tools: make(map[string]ToolActivity), toolRefs: make(map[string]int)}
+	manager.enrichHost(context.Background(), "scan", HostObservation{
+		Addresses: []Address{{Address: "192.0.2.1", Type: "ipv4"}},
+		Ports:     []Port{{Protocol: "tcp", Number: 443, State: "open"}},
+	})
+	if len(store.savedHostnames) != 1 || store.savedHostnames[0].Name != "console.example" || store.savedHostnames[0].Type != "TLS_SAN" {
+		t.Fatalf("saved hostnames = %#v", store.savedHostnames)
 	}
 }
 

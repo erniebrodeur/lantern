@@ -778,7 +778,7 @@ export default function App() {
               <section><h3>History and time</h3><p>Use the boxes beside observations to include runs in the field. Selecting multiple runs creates a temporal view. Repeated hostname and IP targets are grouped when DNS or observed addresses show they are the same host.</p></section>
               <section><h3>Navigate the field</h3><p>Drag to orbit, scroll to zoom, and select a sphere for details. Range views move between /24, /16, and /8 address space. Map uses traceroute evidence when a supported route tool is installed.</p></section>
               <section><h3>Sphere colors</h3><p><i className="legend-web" /> Web service &nbsp; <i className="legend-none" /> No open ports &nbsp; <i className="legend-up" /> Other services &nbsp; <i className="legend-provisional" /> Discovered &nbsp; <i className="legend-pending" /> No response</p></section>
-              <section><h3>Host evidence</h3><p>The right panel shows network ownership and location, OS fingerprints, and exposed services. Web ports and hostnames open directly when a usable URL is available.</p></section>
+              <section><h3>Host evidence</h3><p>The right panel shows network ownership and location, OS fingerprints, TLS certificates, and exposed services. Web ports and hostnames open directly when a usable URL is available.</p></section>
             </div>
           </section>
         </div>
@@ -1070,6 +1070,10 @@ function HostInspector({ host, scan, scanLabel }: { host: HostObservation; scan:
     const advertisement = serviceAdvertisement(evidence);
     return advertisement ? [{ evidence, advertisement }] : [];
   });
+  const certificates = (host.evidence ?? []).flatMap((evidence) => {
+    const result = tlsCertificateResult(evidence);
+    return result ? [{ evidence, result }] : [];
+  });
   return (
     <div className="host-inspector">
       <span className="eyebrow">Host observation</span>
@@ -1103,6 +1107,7 @@ function HostInspector({ host, scan, scanLabel }: { host: HostObservation; scan:
           )}
         </section>
       )}
+      {certificates.length > 0 && <CertificateCard certificates={certificates} />}
       <div className="services-heading"><span>Services</span><b>{host.ports.filter((port) => port.state === "open").length} open</b></div>
       <div className="service-list">
         {host.ports.map((port) => {
@@ -1230,11 +1235,104 @@ interface AdvertisedService {
   port: number;
 }
 
+interface TLSCertificateEvidence {
+  port: number;
+  dnsNames: string[];
+  commonName?: string;
+  ipAddresses: string[];
+  fingerprintSha256: string;
+  notBefore: string;
+  notAfter: string;
+  verificationName: string;
+  verified: boolean;
+  verificationError?: string;
+}
+
+interface TLSCertificateFailureEvidence {
+  port: number;
+  error: string;
+}
+
+type TLSCertificateResult =
+  | { kind: "certificate"; certificate: TLSCertificateEvidence }
+  | { kind: "failure"; failure: TLSCertificateFailureEvidence };
+
+function CertificateCard({ certificates }: { certificates: { evidence: ProviderEvidence; result: TLSCertificateResult }[] }) {
+  return (
+    <section className="certificate-card" aria-label="TLS certificates">
+      <header><span>TLS certificates</span><b>{certificates.length}</b></header>
+      {certificates.map(({ evidence, result }) => {
+        if (result.kind === "failure") return (
+          <div className="certificate-record" key={evidence.id}>
+            <div className="certificate-title">
+              <strong>{result.failure.port}/tcp</strong>
+              <i className="unverified">Handshake failed</i>
+            </div>
+            <dl><div><dt>Error</dt><dd>{result.failure.error}</dd></div></dl>
+          </div>
+        );
+        const certificate = result.certificate;
+        const names = [...certificate.dnsNames, ...certificate.ipAddresses];
+        return (
+          <div className="certificate-record" key={evidence.id}>
+            <div className="certificate-title">
+              <strong>{certificate.port}/tcp</strong>
+              <i className={certificate.verified ? "verified" : "unverified"}>{certificate.verified ? "Verified" : "Unverified"}</i>
+            </div>
+            <dl>
+              {names.length > 0 && <div><dt>Names</dt><dd>{names.join(" · ")}</dd></div>}
+              {certificate.commonName && !certificate.dnsNames.some((name) => name.toLowerCase() === certificate.commonName?.toLowerCase()) && (
+                <div><dt>Common</dt><dd>{certificate.commonName}</dd></div>
+              )}
+              <div><dt>Valid</dt><dd>{formatCertificateDate(certificate.notBefore)} – {formatCertificateDate(certificate.notAfter)}</dd></div>
+              <div><dt>SHA-256</dt><dd className="certificate-fingerprint">{certificate.fingerprintSha256}</dd></div>
+              <div><dt>Verify</dt><dd>{certificate.verified
+                ? certificate.verificationName
+                : certificate.verificationError || `Failed for ${certificate.verificationName}`}</dd></div>
+            </dl>
+          </div>
+        );
+      })}
+    </section>
+  );
+}
+
 function serviceAdvertisement(evidence: ProviderEvidence): AdvertisedService | undefined {
   if (!evidence || evidence.kind !== "service.advertisement") return undefined;
   const payload = evidence.payload;
   if (typeof payload.instance !== "string" || typeof payload.serviceType !== "string" || typeof payload.hostname !== "string" || typeof payload.port !== "number") return undefined;
   return { instance: payload.instance, serviceType: payload.serviceType, hostname: payload.hostname, port: payload.port };
+}
+
+function tlsCertificateResult(evidence: ProviderEvidence): TLSCertificateResult | undefined {
+  if (!evidence || (evidence.kind !== "tls.certificate" && evidence.kind !== "tls.certificate.failure")) return undefined;
+  const payload = evidence.payload;
+  if (evidence.kind === "tls.certificate.failure") {
+    if (typeof payload.port !== "number" || typeof payload.error !== "string") return undefined;
+    return { kind: "failure", failure: { port: payload.port, error: payload.error } };
+  }
+  if (
+    typeof payload.port !== "number" ||
+    !Array.isArray(payload.dnsNames) || !payload.dnsNames.every((name) => typeof name === "string") ||
+    typeof payload.fingerprintSha256 !== "string" ||
+    typeof payload.notBefore !== "string" || typeof payload.notAfter !== "string" ||
+    typeof payload.verificationName !== "string" || typeof payload.verified !== "boolean"
+  ) return undefined;
+  const ipAddresses = Array.isArray(payload.ipAddresses)
+    ? payload.ipAddresses.filter((address): address is string => typeof address === "string")
+    : [];
+  return { kind: "certificate", certificate: {
+    port: payload.port,
+    dnsNames: payload.dnsNames,
+    commonName: typeof payload.commonName === "string" ? payload.commonName : undefined,
+    ipAddresses,
+    fingerprintSha256: payload.fingerprintSha256,
+    notBefore: payload.notBefore,
+    notAfter: payload.notAfter,
+    verificationName: payload.verificationName,
+    verified: payload.verified,
+    verificationError: typeof payload.verificationError === "string" ? payload.verificationError : undefined,
+  } };
 }
 
 function OwnershipCard({ ownership }: { ownership: Ownership }) {
@@ -1349,6 +1447,12 @@ function messageFor(error: unknown): string {
 
 function formatTimestamp(value: string): string {
   return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(value));
+}
+
+function formatCertificateDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric" }).format(date);
 }
 
 function normalizeScanTarget(value: string): string {

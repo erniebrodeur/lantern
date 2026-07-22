@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,6 +19,10 @@ import (
 )
 
 type evidenceProvider struct{}
+
+type certificateProvider struct {
+	calls atomic.Int32
+}
 
 type blockingProvider struct {
 	started chan struct{}
@@ -64,6 +69,26 @@ func (evidenceProvider) Run(_ context.Context, request providers.Request, emit p
 		PayloadVersion: 1, Payload: payload, ObservedAt: time.Now().UTC(), Confidence: 1,
 	}
 	return emit(providers.Event{Type: "evidence", Evidence: &evidence})
+}
+
+func (provider *certificateProvider) Describe() providers.Descriptor {
+	return providers.Descriptor{ID: "test-tls", Capability: "tls-certificate", Label: "Test TLS", SupportedOS: []string{runtime.GOOS}, OSPriorities: map[string]int{runtime.GOOS: 100}}
+}
+
+func (provider *certificateProvider) Probe(context.Context) providers.Status {
+	return providers.Status{ProviderID: "test-tls", Label: "Test TLS", Status: "available", Available: true}
+}
+
+func (provider *certificateProvider) Run(_ context.Context, request providers.Request, emit providers.EmitFunc) error {
+	provider.calls.Add(1)
+	payload, err := json.Marshal(providers.TLSCertificate{Port: 443, DNSNames: []string{"host.example"}})
+	if err != nil {
+		return err
+	}
+	return emit(providers.Event{Type: "evidence", Evidence: &providers.Evidence{
+		Kind: "tls.certificate", Subject: providers.EntityRef{Type: "address", Key: request.Target},
+		PayloadVersion: 1, Payload: payload, ObservedAt: time.Now().UTC(), Confidence: .95,
+	}})
 }
 
 func TestManagerRunsScannerAndPersistsOutput(t *testing.T) {
@@ -444,6 +469,44 @@ func TestManagerPersistsObservationBeforeScanCompletes(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("host observation was not durable while scan remained active")
+}
+
+func TestManagerEnrichesFinalHTTPSHostAfterProvisionalHint(t *testing.T) {
+	directory := t.TempDir()
+	script := filepath.Join(directory, "hinted-nmap")
+	xml := `<?xml version="1.0"?><nmaprun scanner="nmap" version="7.98" xmloutputversion="1.05"><hosthint><status state="up" reason="unknown-response"/><address addr="192.168.1.42" addrtype="ipv4"/></hosthint><host><status state="up" reason="syn-ack"/><address addr="192.168.1.42" addrtype="ipv4"/><ports><port protocol="tcp" portid="443"><state state="open" reason="syn-ack"/><service name="https" tunnel="ssl"/></port></ports></host><runstats><finished exit="success"/><hosts up="1" down="255" total="256"/></runstats></nmaprun>`
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '%s' '"+xml+"'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	database, err := store.Open(filepath.Join(directory, "lantern.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close() })
+	certificate := &certificateProvider{}
+	registry := providers.NewRegistry(runtime.GOOS, func(string) string { return "" }, certificate)
+	manager, err := scans.NewManagerWithProviders(database, script, registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		manager.Shutdown(ctx)
+	})
+	started, err := manager.Start(context.Background(), "192.168.1.0/24")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForStatus(t, manager, started.ID, scans.StatusCompleted, 3*time.Second)
+	evidence, err := manager.ListEvidence(context.Background(), started.ID, providers.EvidenceQuery{Kind: "tls.certificate", Limit: 20})
+	if err != nil || len(evidence) != 1 || certificate.calls.Load() != 1 {
+		t.Fatalf("TLS enrichment = evidence %#v, calls %d, error %v", evidence, certificate.calls.Load(), err)
+	}
+	hosts, err := manager.ListHosts(context.Background(), started.ID, 20, 0)
+	if err != nil || hosts.Total != 1 || hosts.Items[0].Hostname != "host.example" {
+		t.Fatalf("certificate hostname = %#v, %v", hosts, err)
+	}
 }
 
 func TestManagerPreservesObservationsFromFailedScan(t *testing.T) {

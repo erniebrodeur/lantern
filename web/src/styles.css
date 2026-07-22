@@ -240,6 +240,20 @@ h1, h2, p { margin: 0; }
 .ownership-card dl div { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 8px; }
 .ownership-card dt { color: #66857a; font: 700 8px/1.5 "SFMono-Regular", Consolas, monospace; text-transform: uppercase; }
 .ownership-card dd { margin: 0; overflow-wrap: anywhere; color: #8aaca0; font: 8px/1.5 "SFMono-Regular", Consolas, monospace; }
+.certificate-card { margin-top: 20px; padding: 12px 13px; border: 1px solid #29493f; border-radius: 8px; background: #0c1d18; }
+.certificate-card > header { display: flex; align-items: center; justify-content: space-between; color: #75a996; font-size: 8px; font-weight: 800; letter-spacing: .11em; text-transform: uppercase; }
+.certificate-card > header b { min-width: 17px; padding: 3px 5px; border-radius: 999px; color: #a6dec6; background: #173329; font-size: 7px; text-align: center; }
+.certificate-record { padding-top: 11px; }
+.certificate-record + .certificate-record { margin-top: 11px; border-top: 1px solid #203830; }
+.certificate-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.certificate-title strong { color: #d7e6df; font: 700 10px/1.4 "SFMono-Regular", Consolas, monospace; }
+.certificate-title i { padding: 3px 5px; border: 1px solid #315b4c; border-radius: 999px; color: #8bd4b4; font-size: 7px; font-style: normal; letter-spacing: .06em; text-transform: uppercase; }
+.certificate-title i.unverified { border-color: #5a4930; color: #c4a66e; }
+.certificate-record dl { display: grid; gap: 5px; margin: 9px 0 0; }
+.certificate-record dl div { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 8px; }
+.certificate-record dt { color: #628276; font: 700 8px/1.45 "SFMono-Regular", Consolas, monospace; text-transform: uppercase; }
+.certificate-record dd { margin: 0; overflow-wrap: anywhere; color: #94b5a8; font: 8px/1.45 "SFMono-Regular", Consolas, monospace; }
+.certificate-record .certificate-fingerprint { word-break: break-all; color: #6e9285; }
 .services-heading { display: flex; justify-content: space-between; margin-top: 28px; padding-bottom: 9px; border-bottom: 1px solid #20342e; color: #66857a; font-size: 9px; font-weight: 800; letter-spacing: .11em; text-transform: uppercase; }
 .services-heading b { color: #8bd8b5; font-weight: 800; }
 .service-row { display: grid; grid-template-columns: 62px minmax(0, 1fr) auto; gap: 9px; align-items: center; padding: 11px 0; border-bottom: 1px solid #182a25; }

@@ -17,6 +17,7 @@ evidence in SQLite on your machine.
 
 - Correlated host discovery from active Nmap scans and local mDNS/DNS-SD advertisements
 - Port, service, product, OS, hostname, and MAC vendor evidence for each observed host
+- Native HTTPS certificate inspection with certificate-derived hostname evidence
 - Reverse DNS and public network profiles from RDAP with WHOIS field fallback
 - Route topology from MTR or traceroute, rendered alongside hosts in 3D
 - Address-space, route-map, and multi-observation temporal views
