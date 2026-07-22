@@ -11,8 +11,6 @@ pipeline. Lantern combines its results with local service discovery, DNS,
 internet registry data, and route topology, while preserving the supporting
 evidence in SQLite on your machine.
 
-> **Status:** Lantern is under active development. The current version is 0.2.0.
-
 ## Features
 
 - Correlated host discovery from active Nmap scans and local mDNS/DNS-SD advertisements
